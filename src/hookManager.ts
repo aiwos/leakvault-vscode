@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 const SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
-const HOOK_DEST = path.join(os.homedir(), '.leakvault', 'hook.js');
+const HOOK_DEST = path.join(os.homedir(), '.leakvault', 'leakvault-hook.js');
 const CODEX_CONFIG_PATH = path.join(os.homedir(), '.codex', 'config.toml');
 
 const CODEX_BLOCK_BEGIN = '# leakvault-hooks-begin (managed by LeakVault VS Code extension — do not edit)';
@@ -38,12 +38,12 @@ function isLeakVaultEntry(e: unknown): boolean {
   const rec = e as Record<string, unknown> | null;
   if (!rec) return false;
   const flatCmd = rec['command'];
-  if (typeof flatCmd === 'string' && flatCmd.includes('leakvault')) return true;
+  if (typeof flatCmd === 'string' && flatCmd.includes('leakvault-hook.js')) return true;
   const inner = rec['hooks'];
   if (Array.isArray(inner)) {
     for (const h of inner) {
       const cmd = (h as Record<string, unknown> | null)?.['command'];
-      if (typeof cmd === 'string' && cmd.includes('leakvault')) return true;
+      if (typeof cmd === 'string' && cmd.includes('leakvault-hook.js')) return true;
     }
   }
   return false;
@@ -128,6 +128,13 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function resolveVaultDir(vaultDir: string): string {
+  const expanded = vaultDir.startsWith('~')
+    ? path.join(os.homedir(), vaultDir.slice(1))
+    : vaultDir;
+  return path.resolve(expanded);
+}
+
 function installCodexHooks(hookDest: string): void {
   if (!fs.existsSync(CODEX_CONFIG_PATH)) return;
 
@@ -162,16 +169,17 @@ function uninstallCodexHooks(): void {
 
 export function installHooks(hookScriptSource: string, vaultDir: string): { installed: boolean; message: string } {
   try {
-    const hookDest = path.join(vaultDir, 'hook.js');
+    const resolvedDir = resolveVaultDir(vaultDir);
+    const hookDest = path.join(resolvedDir, 'leakvault-hook.js');
 
     // Patch VAULT_DIR in the deployed script so the hook writes vault files
     // and last-redacted.txt to the configured vault dir, not the hardcoded default.
     const patchedSource = hookScriptSource.replace(
       /^const VAULT_DIR = .*$/m,
-      `const VAULT_DIR = ${JSON.stringify(vaultDir)};`,
+      `const VAULT_DIR = ${JSON.stringify(resolvedDir)};`,
     );
 
-    fs.mkdirSync(vaultDir, { recursive: true });
+    fs.mkdirSync(resolvedDir, { recursive: true });
     fs.writeFileSync(hookDest, patchedSource, 'utf8');
     fs.chmodSync(hookDest, 0o755);
 
