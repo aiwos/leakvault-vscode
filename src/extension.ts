@@ -158,8 +158,9 @@ function setupRedactedClipboardWatcher(ctx: vscode.ExtensionContext, vaultDir: s
   // filename can be null on some platforms — fire onChange() in that case too.
   let watcher: fs.FSWatcher | undefined;
   try {
-    watcher = fs.watch(vaultDir, (_event: fs.WatchEventType, filename: string | null) => {
-      if (filename === null || filename === 'last-redacted.txt') {
+    watcher = fs.watch(vaultDir, (_event: fs.WatchEventType, filename: string | Buffer | null) => {
+      const name = filename == null ? null : filename.toString();
+      if (name === null || name === 'last-redacted.txt') {
         void onChange();
       }
     });
