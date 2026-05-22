@@ -254,6 +254,14 @@ async function main() {
     // (see anthropics/claude-code#27365). Block + suggest redacted version.
     const blockMsg = '[LeakVault] BLOCKED: Prompt contained ' + count + ' credential(s) (' + handles.join(', ') + '). Re-submit the redacted prompt instead:\n\n' + redacted;
     process.stderr.write(blockMsg);
+    // Drop the redacted prompt where the VS Code extension can pick it up
+    // and copy it to the clipboard. Best-effort — never abort the block.
+    try {
+      fs.mkdirSync(VAULT_DIR, { recursive: true });
+      fs.writeFileSync(path.join(VAULT_DIR, 'last-redacted.txt'), redacted, { mode: 0o600 });
+    } catch {
+      // ignore
+    }
     process.stdout.write(JSON.stringify({
       systemMessage: summary,
       decision: 'block',

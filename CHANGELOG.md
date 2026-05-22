@@ -2,6 +2,12 @@
 
 All notable changes to LeakVault will be documented in this file.
 
+## [0.1.16] - 2026-05-22
+
+### Added
+- **Auto-copy redacted prompt to clipboard on block.** When a `UserPromptSubmit` block fires, the hook writes the redacted prompt to `~/.leakvault/last-redacted.txt` (mode `0600`). The extension watches that file via `fs.watch` on the parent directory; on every rewrite it copies the contents to the VS Code clipboard and shows a toast: *"LeakVault blocked a prompt — redacted version copied to clipboard. Paste & resend."* Resubmitting becomes `Ctrl+A → Ctrl+V → Enter`.
+- Auto-resubmit is **not** possible: the Codex panel is a third-party WebView and VS Code exposes no API to inject text into another extension's chat input. The clipboard hand-off is the closest UX achievable without IPC with OpenAI's extension.
+
 ## [0.1.15] - 2026-05-22
 
 ### Removed

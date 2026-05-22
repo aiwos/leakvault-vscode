@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { scan } from './credentialScanner';
@@ -9,6 +10,8 @@ import { VaultStorage } from './vaultStorage';
 
 let statusBar: LeakVaultStatusBar | undefined;
 let vault: VaultStorage | undefined;
+
+const REDACTED_FILE = path.join(os.homedir(), '.leakvault', 'last-redacted.txt');
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   vault = new VaultStorage(ctx.secrets);
@@ -22,6 +25,11 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   if (cfg.get<boolean>('autoInstallHooks', true)) {
     doInstallHooks(ctx);
   }
+
+  // Watch ~/.leakvault/last-redacted.txt. The hook writes the redacted prompt
+  // there whenever it blocks a UserPromptSubmit; copying it straight to the
+  // clipboard turns the block UX into "Ctrl+A → paste → Enter".
+  setupRedactedClipboardWatcher(ctx);
 
   const participant = registerChatParticipant(ctx, vault, statusBar);
   ctx.subscriptions.push(participant);
@@ -112,4 +120,54 @@ function doInstallHooks(ctx: vscode.ExtensionContext): { message: string } {
     return { message: 'LeakVault: could not read bundled hook script.' };
   }
   return installHooks(hookScript);
+}
+
+function setupRedactedClipboardWatcher(ctx: vscode.ExtensionContext): void {
+  fs.mkdirSync(path.dirname(REDACTED_FILE), { recursive: true });
+
+  // Track mtime so we only react when the file is actually rewritten.
+  let lastMtimeMs = 0;
+  try {
+    lastMtimeMs = fs.statSync(REDACTED_FILE).mtimeMs;
+  } catch {
+    // file may not exist yet
+  }
+
+  const onChange = async (): Promise<void> => {
+    try {
+      const stat = fs.statSync(REDACTED_FILE);
+      if (stat.mtimeMs === lastMtimeMs) return;
+      lastMtimeMs = stat.mtimeMs;
+
+      const redacted = fs.readFileSync(REDACTED_FILE, 'utf8');
+      if (!redacted) return;
+
+      await vscode.env.clipboard.writeText(redacted);
+      statusBar?.flashAlert(1);
+
+      const cfg = vscode.workspace.getConfiguration('leakvault');
+      if (cfg.get<boolean>('notifyOnDetection', true)) {
+        vscode.window.showWarningMessage(
+          'LeakVault blocked a prompt — redacted version copied to clipboard. Paste & resend.'
+        );
+      }
+    } catch {
+      // best-effort
+    }
+  };
+
+  // VS Code's FileSystemWatcher doesn't watch outside the workspace, so use
+  // fs.watch on the parent directory and filter by filename.
+  let watcher: fs.FSWatcher | undefined;
+  try {
+    watcher = fs.watch(path.dirname(REDACTED_FILE), (_event, filename) => {
+      if (filename === 'last-redacted.txt') {
+        void onChange();
+      }
+    });
+  } catch {
+    // best-effort
+  }
+
+  ctx.subscriptions.push({ dispose: () => watcher?.close() });
 }
