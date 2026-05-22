@@ -2,6 +2,35 @@
 
 All notable changes to LeakVault will be documented in this file.
 
+## [0.1.21] - 2026-05-22
+
+### Fixed
+- **`resolveVaultDir` tilde expansion.** `~/.leakvault`.slice(1)` produced `/.leakvault` (an absolute path), causing `path.join(homedir, '/.leakvault')` to discard the homedir. Now strips `~/` as a two-character prefix (`slice(2)`) and handles bare `~` as a separate case.
+- **`isLeakVaultEntry` backward compatibility.** After renaming the deployed hook to `leakvault-hook.js`, the old detection logic would have missed entries written by earlier releases (`~/.leakvault/hook.js`). Now matches both the new fixed basename and the legacy `.leakvault/hook.js` pattern so upgrades cleanly replace prior installs.
+- **VAULT_DIR patch verification.** `installHooks` now checks that the regex replacement actually modified the hook source; returns an explicit failure message if the `VAULT_DIR` constant is missing (e.g. after a future rename in the bundled script).
+- **`vault.dir` path normalization.** `VaultStorage` now expands `~` and calls `path.resolve()` in its constructor, ensuring `vault.dir` is always an absolute path. Previously, a setting like `~/.leakvault` would be passed verbatim to `fs.watch` and file operations, resolving against the process CWD instead of the home directory.
+
+## [0.1.20] - 2026-05-22
+
+### Fixed
+- **Custom vault directory support.** `installHooks` now accepts `vaultDir`, patches the `VAULT_DIR` constant in the deployed hook script, and writes the hook to `<vaultDir>/leakvault-hook.js`. Previously the hook was always written to `~/.leakvault/hook.js` regardless of `leakvault.vaultDir`, so the clipboard watcher and vault storage would silently diverge on custom paths.
+- **Path-independent hook detection.** Hook is now deployed as `leakvault-hook.js` (fixed basename) so `isLeakVaultEntry()` matches on the filename rather than requiring the directory name to contain `"leakvault"`. Custom dirs like `/tmp/vault` no longer accumulate duplicate hooks on reinstall.
+- **`vault.dir` passed to watcher and installer.** Both `setupRedactedClipboardWatcher` and `doInstallHooks` in `extension.ts` now receive and use `vault.dir`, keeping the watcher and hook in the same directory.
+- **Removed dead `seen` parameter from `redactDeep`.** The `seen` parameter was threaded through all recursive calls but never read; `scan()` deduplicates independently. Removed from the function signature and all call sites.
+
+## [0.1.19] - 2026-05-22
+
+### Fixed
+- **Hooks persist across VS Code sessions.** `deactivate()` no longer calls `uninstallHooks()` — hooks are intentionally left installed so protection runs even when VS Code is closed.
+- **Clipboard watcher respects `leakvault.vaultDir`.** `last-redacted.txt` is now derived from the configured vault directory instead of a hardcoded `~/.leakvault` path.
+- **`fs.watch` null filename.** On platforms that don't supply a filename in the watch callback the watcher now fires `onChange()` unconditionally, preventing missed clipboard updates.
+- **Vault stores credential plaintext, not the handle.** `scan()` now returns a `plaintexts: Map<handle, plaintext>` alongside `handles`. Both `hook.js` (`storeCredentials`) and the chat participant now encrypt the actual credential value, making the vault decryptable.
+- **`retrieve()` decryption output.** Fixed Buffer + string concatenation (`decipher.update(buf) + decipher.final('utf8')`) that produced garbled output — replaced with `Buffer.concat([...]).toString('utf8')`.
+- **Status bar flash residue.** `setActive(false)` now clears `backgroundColor` so a warning flash from `flashAlert()` doesn't persist after protection is toggled off.
+- **Vault file permissions.** `hook.js` now writes `.enc` files with mode `0600` and `chmod`s the vault directory to `0700`.
+- **`security-audit.sh` tsc redirection.** Reversed `2>&1 > file` corrected to `> file 2>&1` so compiler errors are actually captured.
+- **`.vscodeignore` duplicate entries.** Removed three duplicate lines (`*.vsix`, `**/*.map`, `out/test/**`).
+
 ## [0.1.18] - 2026-05-22
 
 ### Changed

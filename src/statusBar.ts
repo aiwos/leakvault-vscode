@@ -22,6 +22,7 @@ export class LeakVaultStatusBar {
       this.item.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
     } else {
       this.item.text = `$(unlock) LeakVault (off)`;
+      this.item.backgroundColor = undefined;
       this.item.color = new vscode.ThemeColor('statusBarItem.warningForeground');
     }
   }

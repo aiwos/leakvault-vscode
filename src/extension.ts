@@ -1,17 +1,14 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { scan } from './credentialScanner';
 import { registerChatParticipant } from './chatParticipant';
-import { installHooks, uninstallHooks } from './hookManager';
+import { installHooks } from './hookManager';
 import { LeakVaultStatusBar } from './statusBar';
 import { VaultStorage } from './vaultStorage';
 
 let statusBar: LeakVaultStatusBar | undefined;
 let vault: VaultStorage | undefined;
-
-const REDACTED_FILE = path.join(os.homedir(), '.leakvault', 'last-redacted.txt');
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   vault = new VaultStorage(ctx.secrets);
@@ -23,20 +20,21 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('leakvault');
 
   if (cfg.get<boolean>('autoInstallHooks', true)) {
-    doInstallHooks(ctx);
+    doInstallHooks(ctx, vault.dir);
   }
 
-  // Watch ~/.leakvault/last-redacted.txt. The hook writes the redacted prompt
+  // Watch <vaultDir>/last-redacted.txt. The hook writes the redacted prompt
   // there whenever it blocks a UserPromptSubmit; copying it straight to the
   // clipboard turns the block UX into "Ctrl+A → paste → Enter".
-  setupRedactedClipboardWatcher(ctx);
+  setupRedactedClipboardWatcher(ctx, vault.dir);
 
   const participant = registerChatParticipant(ctx, vault, statusBar);
   ctx.subscriptions.push(participant);
 
   ctx.subscriptions.push(
     vscode.commands.registerCommand('leakvault.installHooks', () => {
-      const result = doInstallHooks(ctx);
+      if (!vault) return;
+      const result = doInstallHooks(ctx, vault.dir);
       vscode.window.showInformationMessage(result.message);
     }),
 
@@ -107,11 +105,11 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   );
 }
 
-export function deactivate(): void {
-  uninstallHooks();
-}
+// Hooks are intentionally left installed on deactivation so protection persists
+// when VS Code is not running. Use the "Install Hooks" command to reinstall.
+export function deactivate(): void {}
 
-function doInstallHooks(ctx: vscode.ExtensionContext): { message: string } {
+function doInstallHooks(ctx: vscode.ExtensionContext, vaultDir: string): { message: string } {
   const hookScriptPath = path.join(ctx.extensionPath, 'scripts', 'hook.js');
   let hookScript: string;
   try {
@@ -119,27 +117,28 @@ function doInstallHooks(ctx: vscode.ExtensionContext): { message: string } {
   } catch {
     return { message: 'LeakVault: could not read bundled hook script.' };
   }
-  return installHooks(hookScript);
+  return installHooks(hookScript, vaultDir);
 }
 
-function setupRedactedClipboardWatcher(ctx: vscode.ExtensionContext): void {
-  fs.mkdirSync(path.dirname(REDACTED_FILE), { recursive: true });
+function setupRedactedClipboardWatcher(ctx: vscode.ExtensionContext, vaultDir: string): void {
+  const redactedFile = path.join(vaultDir, 'last-redacted.txt');
+  fs.mkdirSync(vaultDir, { recursive: true });
 
   // Track mtime so we only react when the file is actually rewritten.
   let lastMtimeMs = 0;
   try {
-    lastMtimeMs = fs.statSync(REDACTED_FILE).mtimeMs;
+    lastMtimeMs = fs.statSync(redactedFile).mtimeMs;
   } catch {
     // file may not exist yet
   }
 
   const onChange = async (): Promise<void> => {
     try {
-      const stat = fs.statSync(REDACTED_FILE);
+      const stat = fs.statSync(redactedFile);
       if (stat.mtimeMs === lastMtimeMs) return;
       lastMtimeMs = stat.mtimeMs;
 
-      const redacted = fs.readFileSync(REDACTED_FILE, 'utf8');
+      const redacted = fs.readFileSync(redactedFile, 'utf8');
       if (!redacted) return;
 
       await vscode.env.clipboard.writeText(redacted);
@@ -156,10 +155,12 @@ function setupRedactedClipboardWatcher(ctx: vscode.ExtensionContext): void {
 
   // VS Code's FileSystemWatcher doesn't watch outside the workspace, so use
   // fs.watch on the parent directory and filter by filename.
+  // filename can be null on some platforms — fire onChange() in that case too.
   let watcher: fs.FSWatcher | undefined;
   try {
-    watcher = fs.watch(path.dirname(REDACTED_FILE), (_event, filename) => {
-      if (filename === 'last-redacted.txt') {
+    watcher = fs.watch(vaultDir, (_event: fs.WatchEventType, filename: string | Buffer | null) => {
+      const name = filename == null ? null : filename.toString();
+      if (name === null || name === 'last-redacted.txt') {
         void onChange();
       }
     });

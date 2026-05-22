@@ -83,6 +83,7 @@ function charClasses(s) {
 function scan(text) {
   const seen = new Set();
   const handles = [];
+  const plaintexts = new Map(); // handle -> plaintext
   let redacted = text;
 
   for (const { re, cg } of PATTERNS) {
@@ -95,7 +96,10 @@ function scan(text) {
       if (isAlreadyHandle(credential)) return match;
       seen.add(credential);
       const h = deriveHandle(credential);
-      if (!handles.includes(h)) handles.push(h);
+      if (!handles.includes(h)) {
+        handles.push(h);
+        plaintexts.set(h, credential);
+      }
       return match.replace(credential, h);
     });
   }
@@ -122,13 +126,16 @@ function scan(text) {
     if (shannonEntropy(match) >= 3.5 && charClasses(match) >= 3) {
       seen.add(match);
       const h = deriveHandle(match);
-      if (!handles.includes(h)) handles.push(h);
+      if (!handles.includes(h)) {
+        handles.push(h);
+        plaintexts.set(h, match);
+      }
       return `${prefix}${h}`;
     }
     return fullMatch;
   });
 
-  return { redacted, count: handles.length, handles };
+  return { redacted, count: handles.length, handles, plaintexts };
 }
 
 // ---------------------------------------------------------------------------
@@ -148,18 +155,19 @@ function getOrCreateKey() {
   }
 }
 
-function storeHandles(handles) {
+function storeCredentials(plaintexts) {
   const key = getOrCreateKey();
-  for (const h of handles) {
+  fs.mkdirSync(VAULT_DIR, { recursive: true });
+  try { fs.chmodSync(VAULT_DIR, 0o700); } catch { /* best-effort */ }
+  for (const [h, plaintext] of plaintexts) {
     const bareHandle = h.replace(/^GPG\[|\]$/g, '');
     const filePath = path.join(VAULT_DIR, bareHandle + '.enc');
     if (!fs.existsSync(filePath)) {
       const iv = crypto.randomBytes(12);
       const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-      const enc = Buffer.concat([cipher.update(bareHandle, 'utf8'), cipher.final()]);
+      const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
       const tag = cipher.getAuthTag();
-      fs.mkdirSync(VAULT_DIR, { recursive: true });
-      fs.writeFileSync(filePath, Buffer.concat([iv, tag, enc]));
+      fs.writeFileSync(filePath, Buffer.concat([iv, tag, enc]), { mode: 0o600 });
     }
   }
 }
@@ -168,16 +176,16 @@ function storeHandles(handles) {
 // Recursively redact every string leaf in a tool_input object so we can
 // pass the result back to Claude Code / Codex via hookSpecificOutput.updatedInput.
 // ---------------------------------------------------------------------------
-function redactDeep(value, seen, allHandles) {
+function redactDeep(value, allPlaintexts) {
   if (typeof value === 'string') {
     const r = scan(value);
-    for (const h of r.handles) if (!allHandles.includes(h)) allHandles.push(h);
+    for (const [h, pt] of r.plaintexts) if (!allPlaintexts.has(h)) allPlaintexts.set(h, pt);
     return r.redacted;
   }
-  if (Array.isArray(value)) return value.map(v => redactDeep(v, seen, allHandles));
+  if (Array.isArray(value)) return value.map(v => redactDeep(v, allPlaintexts));
   if (value && typeof value === 'object') {
     const out = {};
-    for (const k of Object.keys(value)) out[k] = redactDeep(value[k], seen, allHandles);
+    for (const k of Object.keys(value)) out[k] = redactDeep(value[k], allPlaintexts);
     return out;
   }
   return value;
@@ -206,16 +214,17 @@ async function main() {
   // ---- PreToolUse: deep-redact tool_input, emit updatedInput, allow ----
   if (isPreToolUse) {
     const toolInput = input.tool_input ?? input.toolInput ?? {};
-    const collected = [];
-    const updatedInput = redactDeep(toolInput, new Set(), collected);
+    const collectedPlaintexts = new Map();
+    const updatedInput = redactDeep(toolInput, collectedPlaintexts);
 
-    if (collected.length === 0) {
+    if (collectedPlaintexts.size === 0) {
       process.exit(0);
     }
 
-    storeHandles(collected);
+    storeCredentials(collectedPlaintexts);
 
-    const summary = '[LeakVault] redacted ' + collected.length + ' credential(s) in tool input — handles: ' + collected.join(', ');
+    const handles = [...collectedPlaintexts.keys()];
+    const summary = '[LeakVault] redacted ' + collectedPlaintexts.size + ' credential(s) in tool input — handles: ' + handles.join(', ');
     process.stdout.write(JSON.stringify({
       systemMessage: summary,
       hookSpecificOutput: {
@@ -240,12 +249,12 @@ async function main() {
     process.exit(0);
   }
 
-  const { redacted, count, handles } = scan(text);
+  const { redacted, count, handles, plaintexts } = scan(text);
   if (count === 0) {
     process.exit(0);
   }
 
-  storeHandles(handles);
+  storeCredentials(plaintexts);
 
   const summary = '[LeakVault] ' + count + ' credential(s) detected — handles: ' + handles.join(', ');
 

@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { defaultVaultDir, deriveHandle } from './credentialScanner';
@@ -18,7 +19,13 @@ export class VaultStorage {
   constructor(private readonly secrets: vscode.SecretStorage) {
     const cfg = vscode.workspace.getConfiguration('leakvault');
     const customDir = cfg.get<string>('vaultDir', '');
-    this.vaultDir = customDir?.trim() ? customDir.trim() : defaultVaultDir();
+    const raw = customDir?.trim() ? customDir.trim() : defaultVaultDir();
+    const expanded = raw === '~'
+      ? os.homedir()
+      : raw.startsWith('~/')
+        ? path.join(os.homedir(), raw.slice(2))
+        : raw;
+    this.vaultDir = path.resolve(expanded);
   }
 
   // -------------------------------------------------------------------------
@@ -79,7 +86,7 @@ export class VaultStorage {
 
     const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, iv);
     decipher.setAuthTag(authTag);
-    return decipher.update(ciphertext) + decipher.final('utf8');
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   }
 
   // -------------------------------------------------------------------------
