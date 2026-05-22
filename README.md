@@ -2,127 +2,56 @@
 
 **Stop your passwords and API keys from reaching AI chat servers.**
 
-LeakVault sits between you and the AI. Before any message is sent — whether through GitHub Copilot Chat, Claude Code, or the OpenAI Codex VS Code panel — it scans the text, pulls out any secrets it finds, replaces them with safe placeholder handles, and stores the originals in an encrypted local vault. The AI never sees the real values.
+LeakVault sits between you and the AI. When a message or tool call would carry a credential, it scans the text, encrypts the secret to a local vault, and replaces it with a safe handle like `GPG[3f7a9c12b401]`. The AI provider never sees the real value.
+
+The whole thing is one VS Code extension plus one small Node hook script — no proxies, no network rewiring, no extra services.
 
 ---
 
 ## How it works
 
-1. You write a message that accidentally contains a token, password, or connection string.
-2. LeakVault detects it using pattern matching and entropy analysis.
-3. The secret is replaced with a handle like `GPG[3f7a9c12b401]`.
-4. The redacted message is forwarded to the AI model.
-5. The real value is encrypted with AES-256-GCM and saved to `~/.leakvault/`.
+LeakVault registers file-based hooks in two configs:
 
-The AI only ever sees the handle — never the original credential.
+- `~/.claude/settings.json` — Claude Code (CLI and VS Code panel)
+- `~/.codex/config.toml`    — Codex (CLI, TUI, and VS Code panel)
+
+Both call the same script: `~/.leakvault/hook.js`.
+
+| Hook event       | What LeakVault does                                                                  |
+|------------------|---------------------------------------------------------------------------------------|
+| `PreToolUse`     | Deep-redacts every string field in the tool input and **lets the call proceed**       |
+| `UserPromptSubmit` | **Blocks** the prompt and returns a paste-ready redacted version in the block reason |
+| `PostToolUse`    | Warning-only system message when tool output contains a credential                    |
+
+### Why prompts are blocked instead of redacted
+
+Both Claude Code and Codex expose hook outputs that can rewrite **tool inputs** (`hookSpecificOutput.updatedInput`) but not **user prompts**. The Codex binary's wire schema for `UserPromptSubmitHookSpecificOutputWire` declares `additionalProperties: false` and accepts only `hookEventName` + `additionalContext`. There is currently no `updatedPrompt` field on either platform.
+
+Without an API to rewrite the prompt, the only way to keep cleartext credentials out of the model is to refuse the prompt. The block message contains the paste-ready redacted version so you can re-submit it with one keystroke.
+
+When `updatedPrompt` ships, the prompt path will switch to redact-and-allow too.
 
 ---
 
 ## Detected credential types
 
-| Type | Example pattern |
-|------|----------------|
-| AWS Access Key ID | `AKIA...` / `ASIA...` (20 chars) |
+| Type | Example |
+|------|---------|
+| AWS Access Key ID | `AKIA…` / `ASIA…` (20 chars) |
 | AWS Secret Access Key | `aws_secret_access_key = <40-char value>` |
-| GitHub Personal Access Token | `ghp_...`, `github_pat_...`, `gho_...`, `ghs_...`, `ghr_...` |
-| OpenAI API key | `sk-...` / `sk-proj-...` |
-| Anthropic API key | `sk-ant-api...` / `sk-ant-admin01-...` |
-| Stripe secret / restricted key | `sk_live_...`, `sk_test_...`, `rk_live_...`, `rk_test_...` |
-| JSON Web Token (JWT) | `eyJ....<payload>.<signature>` |
-| npm access token | `npm_...` (36 chars) |
-| Slack bot / user token | `xoxb-...`, `xoxa-...`, `xoxp-...`, `xoxr-...`, `xoxs-...` |
-| Slack incoming webhook URL | `https://hooks.slack.com/services/...` |
-| Google API key | `AIza...` (39 chars) |
-| Database connection URL | `postgres://user:`**password**`@host` — only the password segment is redacted |
-| Generic `key = value` assignments | Fields named `password`, `secret`, `api_key`, `auth_token`, `access_token`, `private_key` with values ≥ 12 characters |
-| Natural language passwords | `my password is Tr0ub4dor3`, `password is ...` |
-| High-entropy standalone tokens | Any 16–64 character token with Shannon entropy ≥ 3.5 bits/char and 3+ character classes (letters, digits, symbols) — catches unknown or custom tokens |
-
----
-
-## Features
-
-### @leakvault chat participant
-
-Type `@leakvault` in GitHub Copilot Chat to route your message through LeakVault before it reaches the model.
-
-```
-@leakvault Here is my config: DATABASE_URL=postgres://admin:s3cr3t@db.prod.example.com/app
-```
-
-LeakVault redacts the password, warns you, and forwards the safe version.
-
-**Slash commands:**
-- `@leakvault /scan` — explicitly scan and redact before answering
-- `@leakvault /vault` — list all credential handles stored in the vault
-
-#### Known gap: Copilot Chat without `@leakvault`
-
-If you type a normal prompt into GitHub Copilot Chat **without** prefixing it with `@leakvault`, LeakVault cannot see or scan it. The VS Code public extension API exposes no pre-submit hook for arbitrary chat input — third-party participants are only invoked when the user explicitly `@`-mentions them, and the chat participant `disambiguation` system gives built-in participants (Copilot) precedence. There is no public `onWillSendChatRequest` event.
-
-For Copilot Chat:
-
-- **Always type `@leakvault` first** when your message might contain a secret.
-- Or use **LeakVault: Scan & Redact Clipboard** before pasting into Copilot Chat.
-
-For Claude Code and the OpenAI Codex VS Code panel this gap does not exist — both honor file-based hooks that LeakVault registers automatically (see the Claude Code and Codex sections below).
-
-### Clipboard and selection scanning
-
-Use the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) to scan text without sending it anywhere:
-
-- **LeakVault: Scan & Redact Clipboard** — reads your clipboard, redacts it, and copies the clean version back
-- **LeakVault: Scan & Redact Selection** — redacts the currently selected text in the editor
-
-### Status bar indicator
-
-A small `🔒` icon in the status bar shows protection is active. It flashes when credentials are intercepted.
-
-### Claude Code integration
-
-LeakVault automatically installs hooks into `~/.claude/settings.json` so every Claude Code tool call (bash, file reads, etc.) is scanned before input reaches the model and after output is returned.
-
-### Codex — transparent proxy + CLI hook protection
-
-LeakVault protects the Codex VS Code chat panel through two complementary layers.
-
-#### Layer 1 — API proxy (VS Code panel, transparent)
-
-When the extension activates it starts a local HTTP proxy on a random port (`127.0.0.1:<port>`) and writes one line to `~/.codex/config.toml`:
-
-```toml
-openai_base_url = "http://127.0.0.1:<port>/v1" # leakvault-proxy
-```
-
-Every request the Codex binary sends to the OpenAI API flows through this proxy first. The proxy deep-scans all JSON string fields in the request body, replaces any detected credentials with `GPG[<handle>]` markers, then forwards the clean payload to `api.openai.com`. The redaction is **transparent** — Codex receives the model response normally and you see no blocking or interruption.
-
-When the extension deactivates the `openai_base_url` line is removed so Codex talks to OpenAI directly again.
-
-#### Layer 2 — config.toml hooks (CLI, TUI, all surfaces)
-
-LeakVault also appends `[[hooks.PreToolUse]]` and `[[hooks.PostToolUse]]` entries (inside a sentinel-delimited managed block) to `~/.codex/config.toml`. These fire for **every** Codex surface — the VS Code panel, `codex exec`, the interactive TUI — and cover tool inputs/outputs that the API proxy does not see:
-
-- **`PreToolUse`** — deep-redacts tool input fields and lets the call proceed with clean values
-- **`PostToolUse`** — warning-only notification when tool output contains credentials
-
-Direct config-level hooks bypass the plugin trust system entirely, so they take effect immediately with no per-session approval prompt.
-
-#### Why two layers?
-
-The Codex `UserPromptSubmit` hook can block a prompt but **cannot rewrite it** — confirmed from the open-source Codex hook schema (`UserPromptSubmitHookSpecificOutputWire` has no `updatedPrompt` field). The API proxy is the only mechanism that allows transparent prompt modification for the VS Code panel.
----
-
-## Vault storage
-
-Intercepted credentials are encrypted and stored in `~/.leakvault/` (configurable).
-
-- **Encryption:** AES-256-GCM with a 12-byte random IV and 16-byte auth tag per entry
-- **Key storage:** The encryption key is kept in VS Code's `SecretStorage` (OS keychain on desktop)
-- **Handles:** Derived as the first 12 hex characters of a SHA-256 hash of the plaintext — deterministic so the same secret always maps to the same handle
-
-View stored handles any time:
-- **LeakVault: Open Vault** command — shows a quick-pick list of handles and when they were stored
-- `@leakvault /vault` in chat
+| GitHub PAT | `ghp_…`, `github_pat_…`, `gho_…`, `ghs_…`, `ghr_…` |
+| OpenAI key | `sk-…` / `sk-proj-…` |
+| Anthropic key | `sk-ant-api…` / `sk-ant-admin01-…` |
+| Stripe key | `sk_live_…`, `sk_test_…`, `rk_live_…`, `rk_test_…` |
+| JWT | `eyJ….<payload>.<signature>` |
+| npm token | `npm_…` (36 chars) |
+| Slack token | `xoxb-…`, `xoxa-…`, `xoxp-…`, `xoxr-…`, `xoxs-…` |
+| Slack webhook URL | `https://hooks.slack.com/services/…` |
+| Google API key | `AIza…` (39 chars) |
+| DB connection URL | `postgres://user:GPG[485995535a01]@host` — only the password segment is redacted |
+| Generic `key = value` | `password`, `secret`, `api_key`, `auth_token`, `access_token`, `private_key` with values ≥ 12 chars |
+| Natural language passwords | `my password is GPG[16726f90cfa7]`, `password is …` |
+| High-entropy tokens | 16–64 character tokens with Shannon entropy ≥ 3.5 bits/char and 3+ character classes — catches unknown / custom tokens |
 
 ---
 
@@ -136,16 +65,47 @@ View stored handles any time:
 | `LeakVault: Toggle Protection` | Enables or disables credential interception globally |
 | `LeakVault: Install Copilot Chat Hooks` | Manually (re)installs Claude Code and Codex CLI hooks |
 
+### @leakvault chat participant (Copilot Chat)
+
+Type `@leakvault` in GitHub Copilot Chat to route your message through LeakVault before it reaches the model.
+
+```
+@leakvault Here is my config: DATABASE_URL=postgres://admin:s3cr3t@db.prod.example.com/app
+```
+
+LeakVault redacts the password and forwards the safe version.
+
+**Slash commands:**
+- `@leakvault /scan` — explicitly scan and redact before answering
+- `@leakvault /vault` — list all credential handles stored in the vault
+
+#### Known gap: plain Copilot Chat (no `@leakvault`)
+
+The VS Code public extension API exposes no pre-submit hook for arbitrary chat input — third-party participants are only invoked on explicit `@`-mention. For plain Copilot Chat, either prefix with `@leakvault` or run **LeakVault: Scan & Redact Clipboard** before pasting.
+
+For Claude Code and Codex this gap does not exist — both honor the file-based hooks LeakVault registers automatically.
+
 ---
 
 ## Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `leakvault.enabled` | `true` | Enable or disable credential interception |
-| `leakvault.notifyOnDetection` | `true` | Show a warning notification when credentials are redacted |
-| `leakvault.autoInstallHooks` | `true` | Automatically configure Claude Code / Codex CLI hooks on activation |
+| `leakvault.enabled` | `true` | Enable LeakVault credential interception |
+| `leakvault.notifyOnDetection` | `true` | Show a notification when credentials are detected and redacted |
+| `leakvault.autoInstallHooks` | `true` | Automatically configure Claude Code / Codex hooks on activation |
 | `leakvault.vaultDir` | `~/.leakvault` | Custom path for the encrypted vault directory |
+
+---
+
+## Vault storage
+
+Intercepted credentials are encrypted and stored in `~/.leakvault/`.
+
+- **Encryption:** AES-256-GCM with a 12-byte random IV and 16-byte auth tag per entry
+- **Key storage:** Kept in VS Code's `SecretStorage` (OS keychain on desktop)
+- **Handles:** First 12 hex characters of `GPG[1bfff720f7ac]` — deterministic, so the same secret always maps to the same handle
+- **Permissions:** Vault directory is `0700`, individual files are `0600`
 
 ---
 
@@ -154,7 +114,7 @@ View stored handles any time:
 - VS Code 1.120 or later
 - GitHub Copilot (for the `@leakvault` chat participant)
 - Claude Code CLI (optional, for hook-based protection)
-- Codex CLI (optional, for hook-based protection)
+- Codex CLI or Codex VS Code panel (optional, for hook-based protection)
 
 ---
 

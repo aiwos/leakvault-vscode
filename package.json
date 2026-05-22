@@ -2,7 +2,7 @@
   "name": "leakvault",
   "displayName": "LeakVault — AI Credential Guard",
   "description": "Intercepts passwords, API keys, tokens and connection strings before they reach AI chat servers. Works with GitHub Copilot Chat, Claude Code, and Cursor.",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "publisher": "SylwesterUlatowski",
   "license": "MIT",
   "icon": "images/icon.png",

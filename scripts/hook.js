@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 /**
- * LeakVault standalone hook script
- * Deployed to ~/.leakvault/hook.js by the VS Code extension.
- * Called by:
- *   - ~/.claude/settings.json hooks (Claude Code)
- *   - ~/.codex/config.toml [[hooks.*]] entries (Codex CLI + VS Code panel)
+ * LeakVault standalone hook script.
+ * Deployed to ~/.leakvault/hook.js by the VS Code extension and registered in:
+ *   - ~/.claude/settings.json       (Claude Code)
+ *   - ~/.codex/config.toml          (Codex CLI + VS Code panel)
  *
- * Behavior (owner intent: redact, do not block where possible):
- *   - UserPromptSubmit: MUST block (no updatedPrompt API in Claude Code or
- *     Codex today — see anthropics/claude-code#27365). Returns the redacted
- *     prompt in the block reason so the user can paste it back.
- *   - PreToolUse: REDACT AND ALLOW via hookSpecificOutput.updatedInput. The
- *     tool runs with credentials replaced by GPG[<handle>] markers.
- *   - PostToolUse: warning-only (system message), already non-blocking.
+ * Behavior:
+ *   - PreToolUse: deep-redact `tool_input`, allow the call to continue with
+ *     credentials replaced by GPG[<handle>] markers (hookSpecificOutput.updatedInput).
+ *   - UserPromptSubmit: block. Both Claude Code and Codex omit `updatedPrompt`
+ *     from the UserPromptSubmit hook output schema (Codex binary confirms:
+ *     `UserPromptSubmitHookSpecificOutputWire` accepts only `hookEventName` +
+ *     `additionalContext` with additionalProperties: false), so blocking is
+ *     the only way to keep cleartext credentials out of the model. The block
+ *     reason contains the paste-ready redacted prompt.
+ *   - PostToolUse: warning-only system message, non-blocking.
  */
 
 'use strict';
@@ -98,11 +100,13 @@ function scan(text) {
     });
   }
 
-  // High-entropy fallback — charset tightened (no !@#$%^&*) — bug #3
+  // Parens are excluded from the charset on purpose: function calls like
+  // `setActive(!current)` were being treated as high-entropy tokens. Real
+  // credentials don't contain `(` or `)`.
   const FILE_EXT_RE = /\.(?:js|mjs|ts|tsx|jsx|py|go|rs|java|cs|cpp|rb|php|sh|md|json|yaml|yml|toml|env|xml|html|css|map|lock|vsix|whl|jar|apk|deb)$/i;
   const VERSION_RE = /[-._@]v?\d+\.\d+/;
   const STRONG_SPECIALS = /[!@#$%^&*+]/;
-  const heRe = /(^|[^A-Za-z0-9])([A-Za-z0-9!@#$%^&*()_+\-=]{16,64})(?=$|[^A-Za-z0-9])/g;
+  const heRe = /(^|[^A-Za-z0-9])([A-Za-z0-9!@#$%^&*_+\-=]{16,64})(?=$|[^A-Za-z0-9])/g;
   heRe.lastIndex = 0;
   redacted = redacted.replace(heRe, (fullMatch, prefix, match, offset) => {
     if (seen.has(match)) return fullMatch;

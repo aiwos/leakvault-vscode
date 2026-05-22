@@ -77,9 +77,10 @@ function charClasses(s: string): number {
   return classes;
 }
 
-// HIGH_ENTROPY_RE — charset tightened (no !@#$%^&*) to avoid matching regex
-// character classes in source code. See AGENT_NOTES bug #3.
-const HIGH_ENTROPY_RE = /(^|[^A-Za-z0-9])([A-Za-z0-9!@#$%^&*()_+\-=]{16,64})(?=$|[^A-Za-z0-9])/g;
+// Parens are excluded from the charset on purpose: function calls like
+// `setActive(!current)` were being treated as high-entropy tokens. Real
+// credentials don't contain `(` or `)`.
+const HIGH_ENTROPY_RE = /(^|[^A-Za-z0-9])([A-Za-z0-9!@#$%^&*_+\-=]{16,64})(?=$|[^A-Za-z0-9])/g;
 const FILE_EXT_RE = /\.(?:js|mjs|ts|tsx|jsx|py|go|rs|java|cs|cpp|rb|php|sh|md|json|yaml|yml|toml|env|xml|html|css|map|lock|vsix|whl|jar|apk|deb)$/i;
 const VERSION_RE = /[-._@]v?\d+\.\d+/;
 const STRONG_SPECIALS = /[!@#$%^&*+]/;

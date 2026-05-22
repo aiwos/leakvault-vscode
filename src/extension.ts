@@ -3,79 +3,29 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { scan } from './credentialScanner';
 import { registerChatParticipant } from './chatParticipant';
-import { installHooks, uninstallHooks, installCodexProxyUrl, uninstallCodexProxyUrl } from './hookManager';
+import { installHooks, uninstallHooks } from './hookManager';
 import { LeakVaultStatusBar } from './statusBar';
 import { VaultStorage } from './vaultStorage';
-import { CodexProxy } from './codexProxy';
 
 let statusBar: LeakVaultStatusBar | undefined;
 let vault: VaultStorage | undefined;
-let codexProxy: CodexProxy | undefined;
 
 export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
-  // -------------------------------------------------------------------------
-  // Core services
-  // -------------------------------------------------------------------------
   vault = new VaultStorage(ctx.secrets);
   await vault.init();
 
   statusBar = new LeakVaultStatusBar();
   ctx.subscriptions.push({ dispose: () => statusBar?.dispose() });
 
-  // -------------------------------------------------------------------------
-  // Codex API proxy — intercepts requests transparently before they reach
-  // api.openai.com so credentials typed in the Codex VS Code panel are
-  // redacted without any user action.  openai_base_url in config.toml is
-  // pointed at the local proxy port; restored to clean on deactivate.
-  // -------------------------------------------------------------------------
   const cfg = vscode.workspace.getConfiguration('leakvault');
-  let proxyPort: number | undefined;
 
-  if (cfg.get<boolean>('enabled', true)) {
-    const proxy = new CodexProxy((count, handles) => {
-      statusBar?.flashAlert(count);
-      if (cfg.get<boolean>('notifyOnDetection', true)) {
-        vscode.window.showWarningMessage(
-          `LeakVault: ${count} credential(s) redacted from Codex prompt. Handles: ${handles.join(', ')}`
-        );
-      }
-    });
-    try {
-      const port = await proxy.start();
-      codexProxy = proxy;
-      proxyPort = port;
-    } catch (err) {
-      vscode.window.showWarningMessage(
-        `LeakVault: Codex proxy failed to start (${String(err)}). Hook-based protection still active.`
-      );
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Auto-install hooks on first activation (or when setting changes)
-  // -------------------------------------------------------------------------
   if (cfg.get<boolean>('autoInstallHooks', true)) {
     doInstallHooks(ctx);
   }
 
-  // Write proxy URL AFTER hooks install — doInstallHooks calls stripLeakVaultBlock
-  // which removes openai_base_url/chatgpt_base_url lines, so we must write them last.
-  if (proxyPort !== undefined) {
-    installCodexProxyUrl(proxyPort);
-    vscode.window.showInformationMessage(
-      `LeakVault: Codex proxy active on port ${proxyPort} — credentials will be redacted transparently.`
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // @leakvault chat participant
-  // -------------------------------------------------------------------------
   const participant = registerChatParticipant(ctx, vault, statusBar);
   ctx.subscriptions.push(participant);
 
-  // -------------------------------------------------------------------------
-  // Commands
-  // -------------------------------------------------------------------------
   ctx.subscriptions.push(
     vscode.commands.registerCommand('leakvault.installHooks', () => {
       const result = doInstallHooks(ctx);
@@ -151,13 +101,8 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
 
 export function deactivate(): void {
   uninstallHooks();
-  uninstallCodexProxyUrl();
-  codexProxy?.stop();
 }
 
-// ---------------------------------------------------------------------------
-// Helper
-// ---------------------------------------------------------------------------
 function doInstallHooks(ctx: vscode.ExtensionContext): { message: string } {
   const hookScriptPath = path.join(ctx.extensionPath, 'scripts', 'hook.js');
   let hookScript: string;

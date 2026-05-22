@@ -2,6 +2,18 @@
 
 All notable changes to LeakVault will be documented in this file.
 
+## [0.1.15] - 2026-05-22
+
+### Removed
+- **Codex API proxy (`src/codexProxy.ts`) is gone.** The 0.1.7–0.1.14 design ran a local HTTP server on a random port and rewrote `openai_base_url` / `chatgpt_base_url` in `~/.codex/config.toml` so every Codex API request was redacted in flight. In practice the proxy was overkill — the same protection is achievable with the file-based hooks already registered for Claude Code, and a proxy adds an extra moving part (port allocation, lifecycle, TOML mutation) for no extra coverage. The extension now uses hooks only.
+- `installCodexProxyUrl` / `uninstallCodexProxyUrl` and the `# leakvault-proxy` tagged lines they wrote. Upgrading from 0.1.7–0.1.14 automatically strips any stale `openai_base_url` / `chatgpt_base_url` line on first activation, so Codex stops routing to a port that no longer exists.
+- `scripts/install-codex-prompt-hook.js` — obsolete marketplace-plugin installer left over from 0.1.4.
+- `AGENT_NOTES.md` — bugs it tracked (claudeHookEntry shape, scanner self-redaction, HIGH_ENTROPY_RE brackets) are all fixed.
+
+### Changed
+- README rewritten around the hooks-only architecture. Drops the two-layer (proxy + hooks) explanation in favor of one table: `PreToolUse` redacts and allows, `UserPromptSubmit` blocks with paste-ready redacted text in the reason, `PostToolUse` notifies.
+- Codex `UserPromptSubmit` blocking is now documented as the intentional design — confirmed against the bundled Codex binary's JSON schema (`UserPromptSubmitHookSpecificOutputWire` declares `additionalProperties: false` and accepts only `hookEventName` + `additionalContext`, no `updatedPrompt`).
+
 ## [0.1.7] - 2026-05-21
 
 ### Fixed

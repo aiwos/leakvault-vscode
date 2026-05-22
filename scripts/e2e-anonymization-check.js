@@ -161,9 +161,9 @@ function runHookSuite() {
     if (hook.error) {
       errors.push(hook.error.message);
     }
-    if (hook.stderr.trim()) {
-      errors.push(`stderr: ${hook.stderr.trim()}`);
-    }
+    // UserPromptSubmit blocks via exit 2 and writes the block reason to stderr
+    // — that's required by Codex/Claude Code, so stderr is expected, not an
+    // error. Only validate it has no plaintext credentials below.
     if (!hook.stdout.trim()) {
       errors.push('hook produced no redaction output');
     } else {
