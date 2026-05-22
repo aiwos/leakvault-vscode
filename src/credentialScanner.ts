@@ -7,6 +7,8 @@ export interface ScanResult {
   redacted: string;
   count: number;
   handles: string[];
+  /** Maps each GPG[...] handle to the original plaintext credential */
+  plaintexts: Map<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -85,8 +87,12 @@ const FILE_EXT_RE = /\.(?:js|mjs|ts|tsx|jsx|py|go|rs|java|cs|cpp|rb|php|sh|md|js
 const VERSION_RE = /[-._@]v?\d+\.\d+/;
 const STRONG_SPECIALS = /[!@#$%^&*+]/;
 
-function redactHighEntropy(text: string, seen: Set<string>): { text: string; handles: string[] } {
+function redactHighEntropy(
+  text: string,
+  seen: Set<string>,
+): { text: string; handles: string[]; plaintexts: Map<string, string> } {
   const handles: string[] = [];
+  const plaintexts = new Map<string, string>();
   const result = text.replace(HIGH_ENTROPY_RE, (fullMatch, prefix: string, match: string, offset: number) => {
     if (seen.has(match)) return fullMatch;
     if (isAlreadyHandle(match)) return fullMatch;
@@ -102,16 +108,18 @@ function redactHighEntropy(text: string, seen: Set<string>): { text: string; han
       seen.add(match);
       const h = deriveHandle(match);
       handles.push(h);
+      plaintexts.set(h, match);
       return `${prefix}${h}`;
     }
     return fullMatch;
   });
-  return { text: result, handles };
+  return { text: result, handles, plaintexts };
 }
 
 export function scan(text: string): ScanResult {
   const seen = new Set<string>();
   const handles: string[] = [];
+  const plaintexts = new Map<string, string>();
   let redacted = text;
 
   for (const { re, credGroup } of PATTERNS) {
@@ -124,18 +132,25 @@ export function scan(text: string): ScanResult {
       if (isAlreadyHandle(credential)) return match;
       seen.add(credential);
       const h = deriveHandle(credential);
-      if (!handles.includes(h)) handles.push(h);
+      if (!handles.includes(h)) {
+        handles.push(h);
+        plaintexts.set(h, credential);
+      }
       return match.replace(credential, h);
     });
   }
 
-  const { text: finalText, handles: entropyHandles } = redactHighEntropy(redacted, seen);
+  const { text: finalText, handles: entropyHandles, plaintexts: entropyPlaintexts } = redactHighEntropy(redacted, seen);
   redacted = finalText;
   for (const h of entropyHandles) {
-    if (!handles.includes(h)) handles.push(h);
+    if (!handles.includes(h)) {
+      handles.push(h);
+      const pt = entropyPlaintexts.get(h);
+      if (pt) plaintexts.set(h, pt);
+    }
   }
 
-  return { original: text, redacted, count: handles.length, handles };
+  return { original: text, redacted, count: handles.length, handles, plaintexts };
 }
 
 export function defaultVaultDir(): string {

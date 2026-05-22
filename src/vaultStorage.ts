@@ -79,7 +79,7 @@ export class VaultStorage {
 
     const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, iv);
     decipher.setAuthTag(authTag);
-    return decipher.update(ciphertext) + decipher.final('utf8');
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   }
 
   // -------------------------------------------------------------------------

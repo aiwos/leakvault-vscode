@@ -45,12 +45,12 @@ export function registerChatParticipant(
       const result = scan(request.prompt);
 
       if (result.count > 0) {
-        // Persist each credential to the encrypted vault
+        // Persist each detected credential (plaintext) to the encrypted vault
         for (const h of result.handles) {
-          const bareHandle = h.replace(/^GPG\[|\]$/g, '');
-          // Try to find the original plaintext from the scan result (best-effort)
-          // We store a marker in the vault so the handle is registered
-          await vault.store(bareHandle).catch(() => undefined);
+          const plaintext = result.plaintexts.get(h);
+          if (plaintext) {
+            await vault.store(plaintext).catch(() => undefined);
+          }
         }
 
         statusBar.flashAlert(result.count);

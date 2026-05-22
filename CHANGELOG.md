@@ -2,6 +2,19 @@
 
 All notable changes to LeakVault will be documented in this file.
 
+## [0.1.19] - 2026-05-22
+
+### Fixed
+- **Hooks persist across VS Code sessions.** `deactivate()` no longer calls `uninstallHooks()` — hooks are intentionally left installed so protection runs even when VS Code is closed.
+- **Clipboard watcher respects `leakvault.vaultDir`.** `last-redacted.txt` is now derived from the configured vault directory instead of a hardcoded `~/.leakvault` path.
+- **`fs.watch` null filename.** On platforms that don't supply a filename in the watch callback the watcher now fires `onChange()` unconditionally, preventing missed clipboard updates.
+- **Vault stores credential plaintext, not the handle.** `scan()` now returns a `plaintexts: Map<handle, plaintext>` alongside `handles`. Both `hook.js` (`storeCredentials`) and the chat participant now encrypt the actual credential value, making the vault decryptable.
+- **`retrieve()` decryption output.** Fixed Buffer + string concatenation (`decipher.update(buf) + decipher.final('utf8')`) that produced garbled output — replaced with `Buffer.concat([...]).toString('utf8')`.
+- **Status bar flash residue.** `setActive(false)` now clears `backgroundColor` so a warning flash from `flashAlert()` doesn't persist after protection is toggled off.
+- **Vault file permissions.** `hook.js` now writes `.enc` files with mode `0600` and `chmod`s the vault directory to `0700`.
+- **`security-audit.sh` tsc redirection.** Reversed `2>&1 > file` corrected to `> file 2>&1` so compiler errors are actually captured.
+- **`.vscodeignore` duplicate entries.** Removed three duplicate lines (`*.vsix`, `**/*.map`, `out/test/**`).
+
 ## [0.1.18] - 2026-05-22
 
 ### Changed

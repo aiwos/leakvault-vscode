@@ -84,7 +84,7 @@ fi
 
 echo "🔍 [4/8] Checking TypeScript compilation..."
 
-if ! npx tsc --noEmit 2>&1 > /tmp/tsc-output.log; then
+if ! npx tsc --noEmit > /tmp/tsc-output.log 2>&1; then
   echo "  ✗ FAILED: TypeScript compilation errors"
   cat /tmp/tsc-output.log | head -20
   FAILED=$((FAILED + 1))
