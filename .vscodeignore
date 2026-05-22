@@ -1,0 +1,12 @@
+.vscode/**
+.vscode-test/**
+src/**
+node_modules/**
+*.vsix
+**/*.map
+out/test/**
+scripts/e2e-anonymization-check.js
+scripts/install-codex-prompt-hook.js
+*.vsix
+**/*.map
+out/test/**

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#0d0d1a"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#4c1d95"/>
+    </linearGradient>
+    <linearGradient id="lock" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <filter id="shieldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blur"/>
+      <feFlood flood-color="#7c3aed" flood-opacity="0.6" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="128" height="128" rx="22" fill="url(#bg)"/>
+
+  <!-- Subtle grid lines for depth -->
+  <line x1="0" y1="64" x2="128" y2="64" stroke="rgba(124,58,237,0.08)" stroke-width="1"/>
+  <line x1="64" y1="0" x2="64" y2="128" stroke="rgba(124,58,237,0.08)" stroke-width="1"/>
+
+  <!-- Shield body -->
+  <path d="M64 11 L101 27 L101 66 C101 90 84 108 64 117 C44 108 27 90 27 66 L27 27 Z"
+        fill="url(#shield)" filter="url(#shieldGlow)"/>
+
+  <!-- Shield inner highlight rim -->
+  <path d="M64 16 L97 31 L97 66 C97 87 82 104 64 113 C46 104 31 87 31 66 L31 31 Z"
+        fill="none" stroke="rgba(167,139,250,0.45)" stroke-width="1.5"/>
+
+  <!-- Shield top gloss (white shimmer) -->
+  <path d="M64 16 L97 31 L97 48 C85 40 74 36 64 36 C54 36 43 40 31 48 L31 31 Z"
+        fill="rgba(255,255,255,0.07)"/>
+
+  <!-- Lock body -->
+  <rect x="45" y="65" width="38" height="30" rx="6" fill="url(#lock)"/>
+  <!-- Lock body inner shine -->
+  <rect x="45" y="65" width="38" height="10" rx="6" fill="rgba(255,255,255,0.3)"/>
+
+  <!-- Lock shackle (closed padlock arc) -->
+  <path d="M53 65 L53 50 A11 12 0 0 1 75 50 L75 65"
+        fill="none" stroke="url(#lock)" stroke-width="8"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Shackle shadow for depth -->
+  <path d="M53 65 L53 50 A11 12 0 0 1 75 50 L75 65"
+        fill="none" stroke="rgba(0,0,0,0.2)" stroke-width="2"
+        stroke-linecap="round" stroke-dasharray="1 6"/>
+
+  <!-- Keyhole: circle + stem -->
+  <circle cx="64" cy="76" r="5" fill="#92400e"/>
+  <rect x="61.5" y="76" width="5" height="10" rx="2.5" fill="#92400e"/>
+
+  <!-- Small shield notch/line detail -->
+  <line x1="64" y1="11" x2="64" y2="18" stroke="rgba(167,139,250,0.5)" stroke-width="2"/>
+</svg>
