@@ -29,8 +29,8 @@ interface ClaudeHookEntry {
   hooks: Array<{ type: string; command: string }>;
 }
 
-function claudeHookEntry(matcher?: string): ClaudeHookEntry {
-  const inner = { type: 'command', command: `"${HOOK_DEST}"` };
+function claudeHookEntry(matcher?: string, hookDest: string = HOOK_DEST): ClaudeHookEntry {
+  const inner = { type: 'command', command: `"${hookDest}"` };
   return matcher ? { matcher, hooks: [inner] } : { hooks: [inner] };
 }
 
@@ -62,8 +62,8 @@ function isLeakVaultEntry(e: unknown): boolean {
 // PreToolUse: redacts `tool_input` and allows the call to proceed.
 // PostToolUse: notify-only on Bash output.
 // -------------------------------------------------------------------------
-function buildCodexHookBlock(): string {
-  const cmd = HOOK_DEST;
+function buildCodexHookBlock(hookDest: string): string {
+  const cmd = hookDest;
   return [
     CODEX_BLOCK_BEGIN,
     '[[hooks.UserPromptSubmit]]',
@@ -128,7 +128,7 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function installCodexHooks(): void {
+function installCodexHooks(hookDest: string): void {
   if (!fs.existsSync(CODEX_CONFIG_PATH)) return;
 
   let content = '';
@@ -140,7 +140,7 @@ function installCodexHooks(): void {
 
   const cleaned = stripLeakVaultBlock(content);
   const trailing = cleaned.endsWith('\n') ? '' : '\n';
-  const next = cleaned + trailing + '\n' + buildCodexHookBlock();
+  const next = cleaned + trailing + '\n' + buildCodexHookBlock(hookDest);
 
   if (next !== content) {
     fs.writeFileSync(CODEX_CONFIG_PATH, next, 'utf8');
@@ -160,40 +160,48 @@ function uninstallCodexHooks(): void {
   }
 }
 
-export function installHooks(hookScriptSource: string): { installed: boolean; message: string } {
+export function installHooks(hookScriptSource: string, vaultDir: string): { installed: boolean; message: string } {
   try {
-    const destDir = path.dirname(HOOK_DEST);
-    fs.mkdirSync(destDir, { recursive: true });
-    fs.writeFileSync(HOOK_DEST, hookScriptSource, 'utf8');
-    fs.chmodSync(HOOK_DEST, 0o755);
+    const hookDest = path.join(vaultDir, 'hook.js');
+
+    // Patch VAULT_DIR in the deployed script so the hook writes vault files
+    // and last-redacted.txt to the configured vault dir, not the hardcoded default.
+    const patchedSource = hookScriptSource.replace(
+      /^const VAULT_DIR = .*$/m,
+      `const VAULT_DIR = ${JSON.stringify(vaultDir)};`,
+    );
+
+    fs.mkdirSync(vaultDir, { recursive: true });
+    fs.writeFileSync(hookDest, patchedSource, 'utf8');
+    fs.chmodSync(hookDest, 0o755);
 
     const settings = readSettings();
     const hooks = (settings['hooks'] as Record<string, unknown[]>) ?? {};
 
     const existingPrompt = (hooks['UserPromptSubmit'] as unknown[] | undefined) ?? [];
     const promptHooks: unknown[] = existingPrompt.filter((e) => !isLeakVaultEntry(e));
-    promptHooks.push(claudeHookEntry());
+    promptHooks.push(claudeHookEntry(undefined, hookDest));
     hooks['UserPromptSubmit'] = promptHooks;
 
     const existingPre = (hooks['PreToolUse'] as unknown[] | undefined) ?? [];
     const preHooks: unknown[] = existingPre.filter((e) => !isLeakVaultEntry(e));
-    preHooks.push(claudeHookEntry('.*'));
+    preHooks.push(claudeHookEntry('.*', hookDest));
     hooks['PreToolUse'] = preHooks;
 
     const existingPost = (hooks['PostToolUse'] as unknown[] | undefined) ?? [];
     const postHooks: unknown[] = existingPost.filter((e) => !isLeakVaultEntry(e));
-    postHooks.push(claudeHookEntry('Bash'));
-    postHooks.push(claudeHookEntry('execute'));
+    postHooks.push(claudeHookEntry('Bash', hookDest));
+    postHooks.push(claudeHookEntry('execute', hookDest));
     hooks['PostToolUse'] = postHooks;
 
     settings['hooks'] = hooks;
     writeSettings(settings);
 
-    installCodexHooks();
+    installCodexHooks(hookDest);
 
     return {
       installed: true,
-      message: `LeakVault hooks installed in ${SETTINGS_PATH}\nHook script: ${HOOK_DEST}\nCodex hooks: ${fs.existsSync(CODEX_CONFIG_PATH) ? CODEX_CONFIG_PATH : '(Codex not installed)'}`,
+      message: `LeakVault hooks installed in ${SETTINGS_PATH}\nHook script: ${hookDest}\nCodex hooks: ${fs.existsSync(CODEX_CONFIG_PATH) ? CODEX_CONFIG_PATH : '(Codex not installed)'}`,
     };
   } catch (err) {
     return {

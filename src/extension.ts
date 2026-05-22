@@ -20,7 +20,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
   const cfg = vscode.workspace.getConfiguration('leakvault');
 
   if (cfg.get<boolean>('autoInstallHooks', true)) {
-    doInstallHooks(ctx);
+    doInstallHooks(ctx, vault.dir);
   }
 
   // Watch <vaultDir>/last-redacted.txt. The hook writes the redacted prompt
@@ -33,7 +33,8 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
 
   ctx.subscriptions.push(
     vscode.commands.registerCommand('leakvault.installHooks', () => {
-      const result = doInstallHooks(ctx);
+      if (!vault) return;
+      const result = doInstallHooks(ctx, vault.dir);
       vscode.window.showInformationMessage(result.message);
     }),
 
@@ -108,7 +109,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
 // when VS Code is not running. Use the "Install Hooks" command to reinstall.
 export function deactivate(): void {}
 
-function doInstallHooks(ctx: vscode.ExtensionContext): { message: string } {
+function doInstallHooks(ctx: vscode.ExtensionContext, vaultDir: string): { message: string } {
   const hookScriptPath = path.join(ctx.extensionPath, 'scripts', 'hook.js');
   let hookScript: string;
   try {
@@ -116,7 +117,7 @@ function doInstallHooks(ctx: vscode.ExtensionContext): { message: string } {
   } catch {
     return { message: 'LeakVault: could not read bundled hook script.' };
   }
-  return installHooks(hookScript);
+  return installHooks(hookScript, vaultDir);
 }
 
 function setupRedactedClipboardWatcher(ctx: vscode.ExtensionContext, vaultDir: string): void {

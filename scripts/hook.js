@@ -176,16 +176,16 @@ function storeCredentials(plaintexts) {
 // Recursively redact every string leaf in a tool_input object so we can
 // pass the result back to Claude Code / Codex via hookSpecificOutput.updatedInput.
 // ---------------------------------------------------------------------------
-function redactDeep(value, seen, allPlaintexts) {
+function redactDeep(value, allPlaintexts) {
   if (typeof value === 'string') {
     const r = scan(value);
     for (const [h, pt] of r.plaintexts) if (!allPlaintexts.has(h)) allPlaintexts.set(h, pt);
     return r.redacted;
   }
-  if (Array.isArray(value)) return value.map(v => redactDeep(v, seen, allPlaintexts));
+  if (Array.isArray(value)) return value.map(v => redactDeep(v, allPlaintexts));
   if (value && typeof value === 'object') {
     const out = {};
-    for (const k of Object.keys(value)) out[k] = redactDeep(value[k], seen, allPlaintexts);
+    for (const k of Object.keys(value)) out[k] = redactDeep(value[k], allPlaintexts);
     return out;
   }
   return value;
@@ -215,7 +215,7 @@ async function main() {
   if (isPreToolUse) {
     const toolInput = input.tool_input ?? input.toolInput ?? {};
     const collectedPlaintexts = new Map();
-    const updatedInput = redactDeep(toolInput, new Set(), collectedPlaintexts);
+    const updatedInput = redactDeep(toolInput, collectedPlaintexts);
 
     if (collectedPlaintexts.size === 0) {
       process.exit(0);
