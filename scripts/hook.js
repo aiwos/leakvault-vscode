@@ -256,9 +256,18 @@ async function main() {
     process.stderr.write(blockMsg);
     // Drop the redacted prompt where the VS Code extension can pick it up
     // and copy it to the clipboard. Best-effort — never abort the block.
+    //
+    // Codex wraps the user's actual message in an IDE-context preamble
+    // ("# Context from my IDE setup: …\n## My request for Codex:\n<msg>").
+    // Strip the preamble so the clipboard contains only the user's message —
+    // ready to paste & resend. Claude Code has no preamble; the fallback is
+    // the full redacted text.
     try {
+      const marker = '## My request for Codex:\n';
+      const idx = redacted.indexOf(marker);
+      const clipboardText = idx >= 0 ? redacted.slice(idx + marker.length).trimStart() : redacted;
       fs.mkdirSync(VAULT_DIR, { recursive: true });
-      fs.writeFileSync(path.join(VAULT_DIR, 'last-redacted.txt'), redacted, { mode: 0o600 });
+      fs.writeFileSync(path.join(VAULT_DIR, 'last-redacted.txt'), clipboardText, { mode: 0o600 });
     } catch {
       // ignore
     }

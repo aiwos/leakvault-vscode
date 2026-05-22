@@ -2,6 +2,14 @@
 
 All notable changes to LeakVault will be documented in this file.
 
+## [0.1.17] - 2026-05-22
+
+### Changed
+- **Clipboard now contains only the user's message, not Codex's IDE-context preamble.** Codex wraps every prompt in `# Context from my IDE setup: … ## My request for Codex: <msg>`. The hook now slices off everything up to and including `## My request for Codex:\n` before writing to `~/.leakvault/last-redacted.txt`, so paste-and-resend gives Codex back just the redacted user message. Claude Code's prompts have no preamble — the slice falls through to the full text.
+
+### Notes
+- Re-confirmed that auto-paste / auto-send is not implementable without OS-level keystroke synthesis. The OpenAI Codex extension's `package.json` contributes 10 commands (`chatgpt.openSidebar`, `chatgpt.newCodexPanel`, `chatgpt.addToThread`, …), none of which accept a prompt argument. The chat input lives in a sealed `"type": "webview"` (codexViewContainer / codexSecondaryViewContainer) that other extensions cannot script into. `editor.action.clipboardPasteAction` only targets text editors. Conclusion: clipboard hand-off + manual paste remains the best achievable UX.
+
 ## [0.1.16] - 2026-05-22
 
 ### Added
