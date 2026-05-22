@@ -2,6 +2,22 @@
 
 All notable changes to LeakVault will be documented in this file.
 
+## [0.1.21] - 2026-05-22
+
+### Fixed
+- **`resolveVaultDir` tilde expansion.** `~/.leakvault`.slice(1)` produced `/.leakvault` (an absolute path), causing `path.join(homedir, '/.leakvault')` to discard the homedir. Now strips `~/` as a two-character prefix (`slice(2)`) and handles bare `~` as a separate case.
+- **`isLeakVaultEntry` backward compatibility.** After renaming the deployed hook to `leakvault-hook.js`, the old detection logic would have missed entries written by earlier releases (`~/.leakvault/hook.js`). Now matches both the new fixed basename and the legacy `.leakvault/hook.js` pattern so upgrades cleanly replace prior installs.
+- **VAULT_DIR patch verification.** `installHooks` now checks that the regex replacement actually modified the hook source; returns an explicit failure message if the `VAULT_DIR` constant is missing (e.g. after a future rename in the bundled script).
+- **`vault.dir` path normalization.** `VaultStorage` now expands `~` and calls `path.resolve()` in its constructor, ensuring `vault.dir` is always an absolute path. Previously, a setting like `~/.leakvault` would be passed verbatim to `fs.watch` and file operations, resolving against the process CWD instead of the home directory.
+
+## [0.1.20] - 2026-05-22
+
+### Fixed
+- **Custom vault directory support.** `installHooks` now accepts `vaultDir`, patches the `VAULT_DIR` constant in the deployed hook script, and writes the hook to `<vaultDir>/leakvault-hook.js`. Previously the hook was always written to `~/.leakvault/hook.js` regardless of `leakvault.vaultDir`, so the clipboard watcher and vault storage would silently diverge on custom paths.
+- **Path-independent hook detection.** Hook is now deployed as `leakvault-hook.js` (fixed basename) so `isLeakVaultEntry()` matches on the filename rather than requiring the directory name to contain `"leakvault"`. Custom dirs like `/tmp/vault` no longer accumulate duplicate hooks on reinstall.
+- **`vault.dir` passed to watcher and installer.** Both `setupRedactedClipboardWatcher` and `doInstallHooks` in `extension.ts` now receive and use `vault.dir`, keeping the watcher and hook in the same directory.
+- **Removed dead `seen` parameter from `redactDeep`.** The `seen` parameter was threaded through all recursive calls but never read; `scan()` deduplicates independently. Removed from the function signature and all call sites.
+
 ## [0.1.19] - 2026-05-22
 
 ### Fixed

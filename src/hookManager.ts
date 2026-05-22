@@ -37,13 +37,16 @@ function claudeHookEntry(matcher?: string, hookDest: string = HOOK_DEST): Claude
 function isLeakVaultEntry(e: unknown): boolean {
   const rec = e as Record<string, unknown> | null;
   if (!rec) return false;
+  const isLeakVaultCmd = (cmd: string): boolean =>
+    cmd.includes('leakvault-hook.js') ||
+    (cmd.includes('.leakvault') && cmd.includes('hook.js'));
   const flatCmd = rec['command'];
-  if (typeof flatCmd === 'string' && flatCmd.includes('leakvault-hook.js')) return true;
+  if (typeof flatCmd === 'string' && isLeakVaultCmd(flatCmd)) return true;
   const inner = rec['hooks'];
   if (Array.isArray(inner)) {
     for (const h of inner) {
       const cmd = (h as Record<string, unknown> | null)?.['command'];
-      if (typeof cmd === 'string' && cmd.includes('leakvault-hook.js')) return true;
+      if (typeof cmd === 'string' && isLeakVaultCmd(cmd)) return true;
     }
   }
   return false;
@@ -129,9 +132,11 @@ function escapeRegExp(s: string): string {
 }
 
 function resolveVaultDir(vaultDir: string): string {
-  const expanded = vaultDir.startsWith('~')
-    ? path.join(os.homedir(), vaultDir.slice(1))
-    : vaultDir;
+  const expanded = vaultDir === '~'
+    ? os.homedir()
+    : vaultDir.startsWith('~/')
+      ? path.join(os.homedir(), vaultDir.slice(2))
+      : vaultDir;
   return path.resolve(expanded);
 }
 
@@ -178,6 +183,10 @@ export function installHooks(hookScriptSource: string, vaultDir: string): { inst
       /^const VAULT_DIR = .*$/m,
       `const VAULT_DIR = ${JSON.stringify(resolvedDir)};`,
     );
+
+    if (patchedSource === hookScriptSource) {
+      return { installed: false, message: 'LeakVault: VAULT_DIR constant not found in hook script — reinstall the extension.' };
+    }
 
     fs.mkdirSync(resolvedDir, { recursive: true });
     fs.writeFileSync(hookDest, patchedSource, 'utf8');
