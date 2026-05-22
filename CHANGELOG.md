@@ -2,6 +2,12 @@
 
 All notable changes to LeakVault will be documented in this file.
 
+## [0.1.18] - 2026-05-22
+
+### Changed
+- Block toast shortened to `LeakVault: redacted prompt in clipboard — Ctrl+V.` Clipboard and selection redaction toasts dropped the handle list.
+- README rewritten as a single short page — behavior table, settings table, vault notes. Dropped the long architecture discussion that overlapped with CHANGELOG.
+
 ## [0.1.17] - 2026-05-22
 
 ### Changed

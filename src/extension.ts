@@ -82,7 +82,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       await vscode.env.clipboard.writeText(result.redacted);
       statusBar?.flashAlert(result.count);
       vscode.window.showWarningMessage(
-        `LeakVault: ${result.count} credential(s) redacted from clipboard. Handles: ${result.handles.join(', ')}`
+        `LeakVault: ${result.count} credential(s) redacted from clipboard.`
       );
     }),
 
@@ -101,7 +101,7 @@ export async function activate(ctx: vscode.ExtensionContext): Promise<void> {
       await editor.edit((eb) => eb.replace(editor.selection, result.redacted));
       statusBar?.flashAlert(result.count);
       vscode.window.showWarningMessage(
-        `LeakVault: ${result.count} credential(s) redacted. Handles: ${result.handles.join(', ')}`
+        `LeakVault: ${result.count} credential(s) redacted.`
       );
     })
   );
@@ -147,9 +147,7 @@ function setupRedactedClipboardWatcher(ctx: vscode.ExtensionContext): void {
 
       const cfg = vscode.workspace.getConfiguration('leakvault');
       if (cfg.get<boolean>('notifyOnDetection', true)) {
-        vscode.window.showWarningMessage(
-          'LeakVault blocked a prompt — redacted version copied to clipboard. Paste & resend.'
-        );
+        vscode.window.showWarningMessage('LeakVault: redacted prompt in clipboard — Ctrl+V.');
       }
     } catch {
       // best-effort
