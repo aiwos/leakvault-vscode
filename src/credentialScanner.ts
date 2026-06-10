@@ -11,11 +11,6 @@ export interface ScanResult {
   plaintexts: Map<string, string>;
 }
 
-// ---------------------------------------------------------------------------
-// Pattern definitions
-// Each entry describes what to match and which capture group IS the credential
-// (credGroup = 0 means the whole match is the credential).
-// ---------------------------------------------------------------------------
 interface PatternDef {
   name: string;
   re: RegExp;
@@ -44,7 +39,6 @@ export function deriveHandle(plaintext: string): string {
   return 'GPG[' + crypto.createHash('sha256').update(plaintext).digest('hex').slice(0, 12) + ']';
 }
 
-// Self-redaction guards (Bug #2 / #3)
 const HANDLE_RE = /^GPG\[[a-f0-9]{12}\]$/;
 
 function isAlreadyHandle(s: string): boolean {
@@ -75,17 +69,28 @@ function charClasses(s: string): number {
   if (/[a-z]/.test(s)) classes++;
   if (/[A-Z]/.test(s)) classes++;
   if (/[0-9]/.test(s)) classes++;
-  if (/[^a-zA-Z0-9]/.test(s)) classes++;
+  // Strong symbols only — _ - + = appear ubiquitously in code identifiers and
+  // must NOT count as a distinguishing class for credential detection.
+  if (/[!@#$%^&*?~|]/.test(s)) classes++;
   return classes;
 }
 
-// Parens are excluded from the charset on purpose: function calls like
-// `setActive(!current)` were being treated as high-entropy tokens. Real
-// credentials don't contain `(` or `)`.
-const HIGH_ENTROPY_RE = /(^|[^A-Za-z0-9])([A-Za-z0-9!@#$%^&*_+\-=]{16,64})(?=$|[^A-Za-z0-9])/g;
+// Parens are excluded: function calls like `setActive(!current)` would be
+// treated as high-entropy tokens. Real credentials don't contain `(` or `)`.
+const HIGH_ENTROPY_RE = /(^|[^A-Za-z0-9])([A-Za-z0-9!@#$%^&*?~|_+\-=]{16,64})(?=$|[^A-Za-z0-9])/g;
 const FILE_EXT_RE = /\.(?:js|mjs|ts|tsx|jsx|py|go|rs|java|cs|cpp|rb|php|sh|md|json|yaml|yml|toml|env|xml|html|css|map|lock|vsix|whl|jar|apk|deb)$/i;
 const VERSION_RE = /[-._@]v?\d+\.\d+/;
-const STRONG_SPECIALS = /[!@#$%^&*+]/;
+// Strong specials — rare in code identifiers, common in passwords.
+// Matches charClasses above: _ - + = are intentionally excluded.
+const STRONG_SPECIALS = /[!@#$%^&*?~|]/;
+
+// Two-track entropy thresholds:
+//   • Token WITH a strong symbol (! @ # $ % ^ & * ? ~ |) → 3.2
+//   • Token WITHOUT a strong symbol (pure alnum) → 4.2
+//     Higher threshold avoids false-positives on CamelCase+digit identifiers
+//     like GPG[f6892b0bce7d] (entropy ~3.9).
+const ENTROPY_THRESHOLD_STRONG = 3.2;
+const ENTROPY_THRESHOLD_NO_SYM = 4.2;
 
 function redactHighEntropy(
   text: string,
@@ -104,7 +109,14 @@ function redactHighEntropy(
     const after = text[start + match.length] ?? '';
     if ((before === ':' && after === '.') || (before === '/' && after === '/')) return fullMatch;
     if (!/[0-9]/.test(match) && !STRONG_SPECIALS.test(match)) return fullMatch;
-    if (shannonEntropy(match) >= 3.5 && charClasses(match) >= 3) {
+    // Skip boring snake_case / config-key tokens: >85% lowercase + underscore/hyphen
+    // is almost certainly a variable name or URL path segment, not a credential.
+    const boringCount = [...match].filter(c => /[a-z]/.test(c) || c === '_' || c === '-').length;
+    if (boringCount / match.length > 0.85) return fullMatch;
+    // Two-track threshold: strong symbol → 3.2, pure alnum → 4.2.
+    const hasStrongSymbol = STRONG_SPECIALS.test(match);
+    const threshold = hasStrongSymbol ? ENTROPY_THRESHOLD_STRONG : ENTROPY_THRESHOLD_NO_SYM;
+    if (shannonEntropy(match) >= threshold && charClasses(match) >= 3) {
       seen.add(match);
       const h = deriveHandle(match);
       handles.push(h);

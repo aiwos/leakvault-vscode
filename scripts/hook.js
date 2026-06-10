@@ -15,6 +15,10 @@
  *     the only way to keep cleartext credentials out of the model. The block
  *     reason contains the paste-ready redacted prompt.
  *   - PostToolUse: warning-only system message, non-blocking.
+ *
+ * Known issue: Codex MCP tool calls print "Failed" in the UI and are not
+ * redacted. Codex likely uses a different hook event name or JSON structure
+ * for MCP PreToolUse calls. Fix tracked in leakvault-vscode issue backlog.
  */
 
 'use strict';
@@ -77,13 +81,15 @@ function shannonEntropy(s) {
 
 function charClasses(s) {
   return ((/[a-z]/.test(s)) ? 1 : 0) + ((/[A-Z]/.test(s)) ? 1 : 0) +
-         ((/[0-9]/.test(s)) ? 1 : 0) + ((/[^a-zA-Z0-9]/.test(s)) ? 1 : 0);
+         ((/[0-9]/.test(s)) ? 1 : 0) +
+         // Strong symbols only — _ - + = are too common in identifiers.
+         ((/[!@#$%^&*?~|]/.test(s)) ? 1 : 0);
 }
 
 function scan(text) {
   const seen = new Set();
   const handles = [];
-  const plaintexts = new Map(); // handle -> plaintext
+  const plaintexts = new Map();
   let redacted = text;
 
   for (const { re, cg } of PATTERNS) {
@@ -104,13 +110,18 @@ function scan(text) {
     });
   }
 
-  // Parens are excluded from the charset on purpose: function calls like
-  // `setActive(!current)` were being treated as high-entropy tokens. Real
-  // credentials don't contain `(` or `)`.
+  // Parens are excluded: function calls like `setActive(!current)` would be
+  // treated as high-entropy tokens. Real credentials don't contain `(` or `)`.
   const FILE_EXT_RE = /\.(?:js|mjs|ts|tsx|jsx|py|go|rs|java|cs|cpp|rb|php|sh|md|json|yaml|yml|toml|env|xml|html|css|map|lock|vsix|whl|jar|apk|deb)$/i;
   const VERSION_RE = /[-._@]v?\d+\.\d+/;
-  const STRONG_SPECIALS = /[!@#$%^&*+]/;
-  const heRe = /(^|[^A-Za-z0-9])([A-Za-z0-9!@#$%^&*_+\-=]{16,64})(?=$|[^A-Za-z0-9])/g;
+  // Strong specials — rare in identifiers, common in passwords. _ - + = excluded.
+  const STRONG_SPECIALS = /[!@#$%^&*?~|]/;
+  // Two-track entropy thresholds:
+  //   strong symbol present → 3.2 (symbols are rare in code identifiers)
+  //   pure alnum           → 4.2 (avoids CamelCase+digit false-positives)
+  const ENTROPY_THRESHOLD_STRONG = 3.2;
+  const ENTROPY_THRESHOLD_NO_SYM = 4.2;
+  const heRe = /(^|[^A-Za-z0-9])([A-Za-z0-9!@#$%^&*?~|_+\-=]{16,64})(?=$|[^A-Za-z0-9])/g;
   heRe.lastIndex = 0;
   redacted = redacted.replace(heRe, (fullMatch, prefix, match, offset) => {
     if (seen.has(match)) return fullMatch;
@@ -123,7 +134,12 @@ function scan(text) {
     if (FILE_EXT_RE.test(match)) return fullMatch;
     if (VERSION_RE.test(match)) return fullMatch;
     if (!/[0-9]/.test(match) && !STRONG_SPECIALS.test(match)) return fullMatch;
-    if (shannonEntropy(match) >= 3.5 && charClasses(match) >= 3) {
+    // Skip boring snake_case / config-key tokens: >85% lowercase + underscore/hyphen.
+    const boringCount = [...match].filter(c => /[a-z]/.test(c) || c === '_' || c === '-').length;
+    if (boringCount / match.length > 0.85) return fullMatch;
+    const hasStrongSymbol = STRONG_SPECIALS.test(match);
+    const threshold = hasStrongSymbol ? ENTROPY_THRESHOLD_STRONG : ENTROPY_THRESHOLD_NO_SYM;
+    if (shannonEntropy(match) >= threshold && charClasses(match) >= 3) {
       seen.add(match);
       const h = deriveHandle(match);
       if (!handles.includes(h)) {
@@ -173,8 +189,7 @@ function storeCredentials(plaintexts) {
 }
 
 // ---------------------------------------------------------------------------
-// Recursively redact every string leaf in a tool_input object so we can
-// pass the result back to Claude Code / Codex via hookSpecificOutput.updatedInput.
+// Recursively redact every string leaf in a tool_input object.
 // ---------------------------------------------------------------------------
 function redactDeep(value, allPlaintexts) {
   if (typeof value === 'string') {
@@ -263,14 +278,6 @@ async function main() {
     // (see anthropics/claude-code#27365). Block + suggest redacted version.
     const blockMsg = '[LeakVault] BLOCKED: Prompt contained ' + count + ' credential(s) (' + handles.join(', ') + '). Re-submit the redacted prompt instead:\n\n' + redacted;
     process.stderr.write(blockMsg);
-    // Drop the redacted prompt where the VS Code extension can pick it up
-    // and copy it to the clipboard. Best-effort — never abort the block.
-    //
-    // Codex wraps the user's actual message in an IDE-context preamble
-    // ("# Context from my IDE setup: …\n## My request for Codex:\n<msg>").
-    // Strip the preamble so the clipboard contains only the user's message —
-    // ready to paste & resend. Claude Code has no preamble; the fallback is
-    // the full redacted text.
     try {
       const marker = '## My request for Codex:\n';
       const idx = redacted.indexOf(marker);

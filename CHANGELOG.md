@@ -2,6 +2,16 @@
 
 All notable changes to LeakVault will be documented in this file.
 
+## [0.1.23] - 2026-06-10
+
+### Fixed
+- **Entropy false positives (high-entropy detector overhaul).** Three root causes fixed:
+  - `charClasses` now counts only strong symbols (`!@#$%^&*?~|`) as the fourth character class; `_ - + =` were previously treated as strong symbols, causing `snake_case_config_keys` and similar identifiers to reach 3 classes and get flagged.
+  - Two-track entropy thresholds: tokens **with** a strong symbol use a lower threshold (3.2); tokens **without** a strong symbol (pure alnum) require a higher threshold (4.2). This eliminates false positives on `sessionId123AbcXyz`-style CamelCase+digits identifiers (entropy ~3.9 < 4.2).
+  - Boring skip: tokens where ≥85% of characters are lowercase letters, underscores, or hyphens are unconditionally skipped (snake_case config keys, URL path segments).
+- **`STRONG_SPECIALS` and `HIGH_ENTROPY_RE` updated** to match the new `charClasses` definition (include `?`, `~`, `|`; align with strong-symbol set).
+- **Codex MCP PreToolUse compatibility issue documented** in hook script header (known issue: Codex MCP tool calls print "Failed" and are not redacted; requires investigation of Codex hook event name/structure).
+
 ## [0.1.21] - 2026-05-22
 
 ### Fixed
